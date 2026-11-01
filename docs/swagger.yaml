@@ -1,0 +1,198 @@
+openapi: 3.0.3
+info:
+  title: Execution Service
+  version: 1.0.0
+  description: Work progress of service orders (task queue, work status and finish). Port 8084.
+servers:
+  - url: http://localhost:8084
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: Propagated to the events published by the request. Generated when absent.
+      schema:
+        type: string
+    ServiceOrderId:
+      name: id
+      in: path
+      required: true
+      description: Service order ULID.
+      schema:
+        type: string
+        maxLength: 26
+    WorkId:
+      name: workId
+      in: path
+      required: true
+      description: Catalog work id (the work of the task).
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Unauthorized:
+      description: Missing or invalid token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The token role is not allowed for this route.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: No execution task for the service order, or the work is not in the task.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: The task is not queued or in progress, the work cannot move, or works are not finished.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      properties:
+        code:
+          type: integer
+        error:
+          type: string
+        errors:
+          type: array
+          items:
+            type: string
+    QueueWork:
+      type: object
+      properties:
+        workId:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [AWAITING_START, IN_PROGRESS, COMPLETED, CANCELLED]
+    QueueItem:
+      type: object
+      properties:
+        taskId:
+          type: string
+        serviceOrderId:
+          type: string
+        status:
+          type: string
+          enum: [QUEUED, IN_PROGRESS]
+        createdAt:
+          type: string
+          format: date-time
+        works:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueueWork'
+    QueueResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueueItem'
+paths:
+  /v1/execution/queue:
+    get:
+      summary: List the execution queue
+      description: Tasks in QUEUED or IN_PROGRESS, oldest first. Roles - ATTENDANT, MECHANIC, ADMIN.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: The active tasks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/service-order/{id}/work/{workId}/next:
+    put:
+      summary: Advance a work to its next status
+      description: |
+        AWAITING_START -> IN_PROGRESS -> COMPLETED. The first work that starts moves the task from QUEUED to
+        IN_PROGRESS and records started_at. Publishes ExecutionWorkStatusChanged with the task saga_id.
+        Roles - MECHANIC, ADMIN.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ServiceOrderId'
+        - $ref: '#/components/parameters/WorkId'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '204':
+          description: The work was advanced.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/service-order/{id}/work/{workId}/cancel:
+    put:
+      summary: Cancel a work
+      description: Allowed from AWAITING_START or IN_PROGRESS. The task stays active. Roles - MECHANIC, ADMIN.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ServiceOrderId'
+        - $ref: '#/components/parameters/WorkId'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '204':
+          description: The work was cancelled.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/service-order/{id}/finish:
+    put:
+      summary: Finish the task of a service order
+      description: |
+        Requires every work to be COMPLETED or CANCELLED (409 otherwise). When all works are CANCELLED the task
+        becomes CANCELLED and ExecutionFailed (ALL_WORKS_CANCELLED) is published; otherwise the task becomes
+        COMPLETED and ExecutionCompleted is published.
+        Note: the monolith did not require finished works; this requirement is new in the execution service.
+        Roles - MECHANIC, ADMIN.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ServiceOrderId'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '204':
+          description: The task was finished.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'

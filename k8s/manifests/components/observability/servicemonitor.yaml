@@ -1,0 +1,14 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: execution-service
+  labels:
+    app: execution-service
+spec:
+  selector:
+    matchLabels:
+      app: execution-service
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
