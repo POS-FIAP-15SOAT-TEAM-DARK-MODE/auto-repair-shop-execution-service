@@ -60,7 +60,7 @@ func (r *Postgres) ListActive(ctx context.Context, ex db.Executor) ([]*task.Task
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []*task.Task
 	var ids []string
@@ -133,7 +133,7 @@ func (r *Postgres) worksByTask(ctx context.Context, ex db.Executor, taskIDs []st
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := make(map[string][]*work.Work, len(taskIDs))
 	for rows.Next() {
