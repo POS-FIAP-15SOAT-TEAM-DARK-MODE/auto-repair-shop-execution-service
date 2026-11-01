@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS outbox CASCADE;
+DROP TABLE IF EXISTS processed_message CASCADE;
+DROP TABLE IF EXISTS execution_work_history CASCADE;
+DROP TABLE IF EXISTS execution_work CASCADE;
+DROP TABLE IF EXISTS execution_task CASCADE;
