@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: execution-service-db-migrate
+  labels:
+    app: execution-service-db-migrate
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: execution-service-db-migrate
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-db
+          image: postgres:15-alpine
+          command:
+            - sh
+            - -c
+            - until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; do echo 'waiting for database...'; sleep 2; done
+          envFrom:
+            - configMapRef:
+                name: execution-service-config
+            - secretRef:
+                name: execution-service-secrets
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.17.1
+          args:
+            - -path=/migrations
+            - -database=postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSLMODE)
+            - up
+          envFrom:
+            - configMapRef:
+                name: execution-service-config
+            - secretRef:
+                name: execution-service-secrets
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        # execution-service-migrations is created from migrations/ by the docker workflow.
+        - name: migrations
+          configMap:
+            name: execution-service-migrations
