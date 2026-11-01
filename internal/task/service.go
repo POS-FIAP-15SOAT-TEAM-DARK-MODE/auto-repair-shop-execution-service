@@ -58,7 +58,7 @@ func (s *Service) EnqueueExecution(ctx context.Context, tx *sql.Tx, env messagin
 func (s *Service) createTask(ctx context.Context, tx *sql.Tx, env messaging.Envelope, p enqueuePayload) error {
 	requested := make([]NewWork, 0, len(p.Works))
 	for _, w := range p.Works {
-		requested = append(requested, NewWork{WorkID: w.WorkID, Name: w.Name})
+		requested = append(requested, NewWork(w))
 	}
 	t, err := New(s.newID, env.ServiceOrderID, env.SagaID, time.Now().UTC(), requested)
 	if errors.Is(err, ErrInvalidWorks) {
