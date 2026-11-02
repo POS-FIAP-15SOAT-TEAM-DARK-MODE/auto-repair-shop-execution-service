@@ -10,6 +10,31 @@ import (
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/work"
 )
 
+const (
+	msgInternal        = "internal server error"
+	msgInfraConflict   = "conflict"
+	msgInfraViolation  = "invalid data"
+	msgUnknownNotFound = "not found"
+)
+
+// Known domain sentinels. Their own messages are safe to show to the client.
+var (
+	notFoundErrors = []error{
+		work.ErrWorkServiceOrderNotFound,
+		task.ErrTaskNotFound,
+	}
+	conflictErrors = []error{
+		task.ErrTaskNotActive,
+		task.ErrWorksNotFinished,
+		work.ErrWorkServiceOrderAlreadyCompleted,
+		work.ErrWorkServiceOrderAlreadyCancelled,
+		work.ErrWorkServiceOrderInvalidStatus,
+	}
+	// Infrastructure errors: the client only gets a generic message, the cause goes to the log.
+	infraConflictErrors  = []error{app.ErrDataConflict, app.ErrInfraConflict}
+	infraViolationErrors = []error{app.ErrDataViolation}
+)
+
 type errorResponse struct {
 	StatusCode int      `json:"code"`
 	Errors     []string `json:"errors,omitempty"`
@@ -26,6 +51,11 @@ func Error(err error) (int, errorResponse) {
 		Errors:     stackedErrors,
 		Error:      errorMsg,
 	}
+}
+
+// IsInfraError reports whether err comes from infrastructure (its message must not reach the client).
+func IsInfraError(err error) bool {
+	return containsAny(err, infraConflictErrors) || containsAny(err, infraViolationErrors)
 }
 
 // getHTTPStatus determines the HTTP status code for a given error.
@@ -56,26 +86,43 @@ func IsJoined(err error) bool {
 }
 
 // buildErrorMessages formats the error messages based on status code.
+// 5xx never exposes the error text; infrastructure 409/422 get generic messages;
+// domain errors answer the message of their own sentinel, never the wrapped cause.
 func buildErrorMessages(err error, status int) ([]string, string) {
 	switch status {
 	case http.StatusBadRequest:
 		return unwrapAll(err), ""
 	case http.StatusNotFound:
-		return nil, err.Error()
-	case http.StatusConflict, http.StatusUnprocessableEntity, http.StatusInternalServerError:
-		// For 409/422 and 5XX unwrap recursively and return the innermost (root cause) error message.
-		root := err
-		for {
-			unwrapped := errors.Unwrap(root)
-			if unwrapped == nil {
-				break
-			}
-			root = unwrapped
+		return nil, domainMessage(err, notFoundErrors, msgUnknownNotFound)
+	case http.StatusConflict:
+		if containsAny(err, infraConflictErrors) {
+			return nil, msgInfraConflict
 		}
-		return nil, root.Error()
+		return nil, domainMessage(err, conflictErrors, msgInfraConflict)
+	case http.StatusUnprocessableEntity:
+		return nil, msgInfraViolation
 	default:
-		return nil, "Internal Server Error"
+		return nil, msgInternal
 	}
+}
+
+// domainMessage returns the message of the first sentinel matched by err, or fallback.
+func domainMessage(err error, sentinels []error, fallback string) string {
+	for _, s := range sentinels {
+		if errors.Is(err, s) {
+			return s.Error()
+		}
+	}
+	return fallback
+}
+
+func containsAny(err error, sentinels []error) bool {
+	for _, s := range sentinels {
+		if errors.Is(err, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func isBadRequestError(err error) bool {
@@ -93,22 +140,15 @@ func isInternalServerError(err error) bool {
 }
 
 func isNotFoundError(err error) bool {
-	return errors.Is(err, work.ErrWorkServiceOrderNotFound) ||
-		errors.Is(err, task.ErrTaskNotFound)
+	return containsAny(err, notFoundErrors)
 }
 
 func isConflictError(err error) bool {
-	return errors.Is(err, app.ErrDataConflict) ||
-		errors.Is(err, app.ErrInfraConflict) ||
-		errors.Is(err, task.ErrTaskNotActive) ||
-		errors.Is(err, task.ErrWorksNotFinished) ||
-		errors.Is(err, work.ErrWorkServiceOrderAlreadyCompleted) ||
-		errors.Is(err, work.ErrWorkServiceOrderAlreadyCancelled) ||
-		errors.Is(err, work.ErrWorkServiceOrderInvalidStatus)
+	return containsAny(err, infraConflictErrors) || containsAny(err, conflictErrors)
 }
 
 func isUnprocessableEntityError(err error) bool {
-	return errors.Is(err, app.ErrDataViolation)
+	return containsAny(err, infraViolationErrors)
 }
 
 func unwrapAll(err error) []string {
