@@ -30,7 +30,13 @@ var (
 		work.ErrWorkServiceOrderAlreadyCancelled,
 		work.ErrWorkServiceOrderInvalidStatus,
 	}
+	// Input-validation sentinels: answered 400, their own messages go to errors[].
 	validationErrors = []error{
+		jsonv2.ErrJSONSyntax,
+		jsonv2.ErrJSONType,
+		jsonv2.ErrJSONUnexpectedEOF,
+		jsonv2.ErrJSONEmptyBody,
+		jsonv2.ErrWrongPayloadFormat,
 		task.ErrInvalidWorks,
 	}
 	// Infrastructure errors: the client only gets a generic message, the cause goes to the log.
@@ -64,7 +70,7 @@ func IsInfraError(err error) bool {
 // getHTTPStatus determines the HTTP status code for a given error.
 func getHTTPStatus(err error) int {
 	switch {
-	case isBadRequestError(err), IsJoined(err):
+	case isBadRequestError(err):
 		return http.StatusBadRequest
 	case isNotFoundError(err):
 		return http.StatusNotFound
@@ -79,22 +85,13 @@ func getHTTPStatus(err error) int {
 	}
 }
 
-func IsJoined(err error) bool {
-	type unwrapper interface {
-		Unwrap() []error
-	}
-
-	var uw unwrapper
-	return errors.As(err, &uw)
-}
-
 // buildErrorMessages formats the error messages based on status code.
 // 5xx never exposes the error text; infrastructure 409/422 get generic messages;
 // domain errors answer the message of their own sentinel, never the wrapped cause.
 func buildErrorMessages(err error, status int) ([]string, string) {
 	switch status {
 	case http.StatusBadRequest:
-		return unwrapAll(err), ""
+		return validationMessages(err), ""
 	case http.StatusNotFound:
 		return nil, domainMessage(err, notFoundErrors, msgUnknownNotFound)
 	case http.StatusConflict:
@@ -129,12 +126,19 @@ func containsAny(err error, sentinels []error) bool {
 }
 
 func isBadRequestError(err error) bool {
-	return errors.Is(err, jsonv2.ErrJSONSyntax) ||
-		errors.Is(err, jsonv2.ErrJSONType) ||
-		errors.Is(err, jsonv2.ErrJSONUnexpectedEOF) ||
-		errors.Is(err, jsonv2.ErrJSONEmptyBody) ||
-		errors.Is(err, jsonv2.ErrWrongPayloadFormat) ||
-		containsAny(err, validationErrors)
+	return len(validationMessages(err)) > 0
+}
+
+// validationMessages returns the messages of the validation sentinels that err matches
+// (also through errors.Join). Any other cause in the same error is never included.
+func validationMessages(err error) []string {
+	var msgs []string
+	for _, s := range validationErrors {
+		if errors.Is(err, s) {
+			msgs = append(msgs, s.Error())
+		}
+	}
+	return msgs
 }
 
 func isInternalServerError(err error) bool {
@@ -153,22 +157,4 @@ func isConflictError(err error) bool {
 
 func isUnprocessableEntityError(err error) bool {
 	return containsAny(err, infraViolationErrors)
-}
-
-func unwrapAll(err error) []string {
-	if err == nil {
-		return nil
-	}
-
-	type multiUnwrap interface {
-		Unwrap() []error
-	}
-	if m, ok := err.(multiUnwrap); ok {
-		var all []string
-		for _, e := range m.Unwrap() {
-			all = append(all, unwrapAll(e)...)
-		}
-		return all
-	}
-	return []string{err.Error()}
 }

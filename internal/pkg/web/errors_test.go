@@ -33,7 +33,7 @@ func TestError_StatusCodes(t *testing.T) {
 		"json syntax":            {jsonv2.ErrJSONSyntax, http.StatusBadRequest},
 		"json empty body":        {jsonv2.ErrJSONEmptyBody, http.StatusBadRequest},
 		"json unsupported value": {jsonv2.ErrJSONUnsupportedValue, http.StatusInternalServerError},
-		"joined errors":          {errors.Join(errors.New("a"), errors.New("b")), http.StatusBadRequest},
+		"joined unknown errors":  {errors.Join(errors.New("a"), errors.New("b")), http.StatusInternalServerError},
 		"unknown error":          {errors.New("unexpected"), http.StatusInternalServerError},
 		"wrapped not found":      {fmt.Errorf("lookup: %w", task.ErrTaskNotFound), http.StatusNotFound},
 		"wrapped conflict":       {fmt.Errorf("finish: %w", task.ErrWorksNotFinished), http.StatusConflict},
@@ -57,9 +57,9 @@ func TestError_BodyShape(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, status)
 	assert.Equal(t, task.ErrTaskNotFound.Error(), body.Error)
 
-	status, body = Error(errors.Join(errors.New("first"), errors.New("second")))
+	status, body = Error(errors.Join(task.ErrInvalidWorks, jsonv2.ErrJSONSyntax))
 	assert.Equal(t, http.StatusBadRequest, status)
-	assert.Equal(t, []string{"first", "second"}, body.Errors)
+	assert.Equal(t, []string{jsonv2.ErrJSONSyntax.Error(), task.ErrInvalidWorks.Error()}, body.Errors)
 	assert.Empty(t, body.Error)
 
 	// 5xx never shows the underlying cause.
@@ -128,4 +128,22 @@ func TestIsInfraError(t *testing.T) {
 	assert.True(t, IsInfraError(app.ErrDataViolation))
 	assert.False(t, IsInfraError(task.ErrTaskNotActive))
 	assert.False(t, IsInfraError(errors.New("unknown")))
+}
+
+func TestError_JoinOfValidationSentinelOnlyListsSentinels(t *testing.T) {
+	err := errors.Join(task.ErrInvalidWorks, errors.New(sensitive))
+	status, body := Error(err)
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Equal(t, []string{task.ErrInvalidWorks.Error()}, body.Errors)
+	assert.Empty(t, body.Error)
+	assert.NotContains(t, fmt.Sprint(body.Errors), "pq:")
+}
+
+func TestError_JoinOfDriverErrorIsGeneric500(t *testing.T) {
+	err := errors.Join(errors.New(sensitive), fmt.Errorf("save: %w", errors.New("pq: connection reset")))
+	status, body := Error(err)
+	assert.Equal(t, http.StatusInternalServerError, status)
+	assert.Equal(t, "internal server error", body.Error)
+	assert.Nil(t, body.Errors)
+	assert.NotContains(t, body.Error, "pq:")
 }
