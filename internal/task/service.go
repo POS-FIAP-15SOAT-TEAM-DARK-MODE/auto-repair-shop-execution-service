@@ -48,7 +48,7 @@ func (s *Service) EnqueueExecution(ctx context.Context, tx *sql.Tx, env messagin
 	case err != nil:
 		return err
 	case existing.IsActive():
-		logger.Of(ctx).Info("execution already queued or in progress, nothing to do", zap.String("service_order_id", env.ServiceOrderID))
+		logger.Of(ctx).Info("execution.enqueue_ignored", zap.String("reason", "already_active"))
 		return nil
 	default:
 		return s.publishFailed(ctx, tx, env.SagaID, env.ServiceOrderID, env.RequestID, existing.ID, reasonInvalidRequest)
@@ -62,7 +62,7 @@ func (s *Service) createTask(ctx context.Context, tx *sql.Tx, env messaging.Enve
 	}
 	t, err := New(s.newID, env.ServiceOrderID, env.SagaID, time.Now().UTC(), requested)
 	if errors.Is(err, ErrInvalidWorks) {
-		logger.Of(ctx).Warn("enqueue execution rejected: invalid works", zap.String("service_order_id", env.ServiceOrderID))
+		logger.Of(ctx).Warn("execution.enqueue_rejected", zap.String("reason", reasonInvalidRequest))
 		return s.publishFailed(ctx, tx, env.SagaID, env.ServiceOrderID, env.RequestID, "", reasonInvalidRequest)
 	}
 	if err != nil {
@@ -84,14 +84,14 @@ func (s *Service) createTask(ctx context.Context, tx *sql.Tx, env messaging.Enve
 func (s *Service) CancelExecution(ctx context.Context, tx *sql.Tx, env messaging.Envelope) error {
 	t, err := s.repo.FindByServiceOrderID(ctx, tx, env.ServiceOrderID)
 	if errors.Is(err, ErrTaskNotFound) {
-		logger.Of(ctx).Info("cancel execution ignored: no task", zap.String("service_order_id", env.ServiceOrderID))
+		logger.Of(ctx).Info("execution.cancel_ignored", zap.String("reason", "no_task"))
 		return nil
 	}
 	if err != nil {
 		return err
 	}
 	if !t.IsActive() {
-		logger.Of(ctx).Info("cancel execution ignored: task already finished", zap.String("service_order_id", env.ServiceOrderID))
+		logger.Of(ctx).Info("execution.cancel_ignored", zap.String("reason", "task_finished"))
 		return nil
 	}
 
@@ -200,11 +200,21 @@ func (s *Service) publishFailed(ctx context.Context, tx *sql.Tx, sagaID, service
 	return s.publish(ctx, tx, sagaID, serviceOrderID, requestID, evExecutionFailed, executionFailedPayload{TaskID: taskID, Reason: reason})
 }
 
-// publish enqueues an event carrying the saga, service order and request ids.
+// publish enqueues an event carrying the saga, service order and request ids, and logs it
+// with them so the saga can be followed across services by saga_id.
 func (s *Service) publish(ctx context.Context, tx *sql.Tx, sagaID, serviceOrderID, requestID, typ string, payload any) error {
 	ev, err := messaging.NewEnvelope(typ, sagaID, serviceOrderID, requestID, payload)
 	if err != nil {
 		return fmt.Errorf("build %s: %w", typ, err)
 	}
-	return messaging.Enqueue(ctx, tx, topicExecutionEvents, "", ev)
+	if err := messaging.Enqueue(ctx, tx, topicExecutionEvents, "", ev); err != nil {
+		return err
+	}
+	logger.Of(ctx).Info("outbox.enqueued",
+		zap.String("type", typ),
+		zap.String("saga_id", sagaID),
+		zap.String("service_order_id", serviceOrderID),
+		zap.String("message_id", ev.MessageID),
+	)
+	return nil
 }
