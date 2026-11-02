@@ -91,3 +91,38 @@ func TestErrorHandlerMiddleware_StatusOKWithErrors(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "silent error")
 }
+
+func TestLoggerMiddleware_PropagatesRequestIDToHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Logger())
+	var seen string
+	router.GET("/test", func(c *gin.Context) {
+		seen = c.Request.Header.Get("X-Request-Id")
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	assert.NotEmpty(t, seen)
+	assert.Equal(t, rec.Header().Get("X-Request-ID"), seen)
+}
+
+func TestLoggerMiddleware_HandlerSeesIncomingRequestID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Logger())
+	var seen string
+	router.GET("/test", func(c *gin.Context) {
+		seen = c.Request.Header.Get("X-Request-Id")
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("X-Request-Id", "upstream-7")
+	router.ServeHTTP(httptest.NewRecorder(), req)
+
+	assert.Equal(t, "upstream-7", seen)
+}

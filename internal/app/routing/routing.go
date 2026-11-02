@@ -21,7 +21,7 @@ func SetupRouter(c *container.HandlersWrapper, m *container.Middlewares) *gin.En
 	router := gin.New()
 
 	for name, mid := range *m {
-		logger.Global().Info("Starting new middleware", zap.String("name", name))
+		logger.Global().Info("middleware.registered", zap.String("name", name))
 		router.Use(mid)
 	}
 
@@ -62,13 +62,23 @@ func mountSwaggerUI(router *gin.Engine) {
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler, ginSwagger.URL("/swagger.yaml")))
 }
 
+// paramsContext copies the route params into the context and tags the request log with the
+// service order id (the route param "id" on every service order route).
+func paramsContext(c *gin.Context) context.Context {
+	ctx := c.Request.Context()
+	for _, v := range c.Params {
+		ctx = context.WithValue(ctx, v.Key, v.Value) //nolint:staticcheck
+		if v.Key == "id" {
+			ctx = logger.With(ctx, zap.String("service_order_id", v.Value))
+		}
+	}
+	return ctx
+}
+
 // GinOnlyErrorHandler adapts a func(ctx, req) error controller to gin.
 func GinOnlyErrorHandler(cb func(context.Context, *http2.Request) error, customStatus ...int) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ctx := c.Request.Context()
-		for _, v := range c.Params {
-			ctx = context.WithValue(ctx, v.Key, v.Value) //nolint:staticcheck
-		}
+		ctx := paramsContext(c)
 
 		if err := cb(ctx, c.Request); err != nil {
 			status, errResp := web.Error(err)
@@ -91,10 +101,7 @@ func GinOnlyErrorHandler(cb func(context.Context, *http2.Request) error, customS
 // GinHandler adapts a func(ctx, req) (T, error) controller to gin.
 func GinHandler[T any](cb func(context.Context, *http2.Request) (T, error), customStatus ...int) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ctx := c.Request.Context()
-		for _, v := range c.Params {
-			ctx = context.WithValue(ctx, v.Key, v.Value) //nolint:staticcheck
-		}
+		ctx := paramsContext(c)
 
 		resp, err := cb(ctx, c.Request)
 		if err != nil {
