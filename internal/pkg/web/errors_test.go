@@ -121,3 +121,11 @@ func TestError_RootCauseForConflict(t *testing.T) {
 	_, body := Error(wrapped)
 	assert.Equal(t, work.ErrWorkServiceOrderAlreadyCancelled.Error(), body.Error)
 }
+
+func TestIsInfraError(t *testing.T) {
+	assert.True(t, IsInfraError(fmt.Errorf("x: %w", app.ErrDataConflict)))
+	assert.True(t, IsInfraError(app.ErrInfraConflict))
+	assert.True(t, IsInfraError(app.ErrDataViolation))
+	assert.False(t, IsInfraError(task.ErrTaskNotActive))
+	assert.False(t, IsInfraError(errors.New("unknown")))
+}
