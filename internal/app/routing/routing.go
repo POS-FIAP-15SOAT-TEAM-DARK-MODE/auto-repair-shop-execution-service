@@ -46,6 +46,14 @@ func SetupRouter(c *container.HandlersWrapper, m *container.Middlewares) *gin.En
 	return router
 }
 
+// logFailure keeps the full error (with its root cause) in the server log for 5xx and for
+// infrastructure 409/422, whose messages are hidden from the client.
+func logFailure(ctx context.Context, status int, err error) {
+	if status >= http2.StatusInternalServerError || web.IsInfraError(err) {
+		logger.Of(ctx).Error(err, zap.Int("status", status))
+	}
+}
+
 func mountSwaggerUI(router *gin.Engine) {
 	router.GET("/swagger.yaml", func(c *gin.Context) {
 		c.Data(http2.StatusOK, "application/yaml; charset=utf-8", api.SwaggerBytes)
@@ -64,6 +72,7 @@ func GinOnlyErrorHandler(cb func(context.Context, *http2.Request) error, customS
 
 		if err := cb(ctx, c.Request); err != nil {
 			status, errResp := web.Error(err)
+			logFailure(ctx, status, err)
 			c.JSON(status, errResp)
 			return
 		}
@@ -90,6 +99,7 @@ func GinHandler[T any](cb func(context.Context, *http2.Request) (T, error), cust
 		resp, err := cb(ctx, c.Request)
 		if err != nil {
 			status, errResp := web.Error(err)
+			logFailure(ctx, status, err)
 			c.JSON(status, errResp)
 			return
 		}
