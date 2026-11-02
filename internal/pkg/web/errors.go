@@ -30,6 +30,9 @@ var (
 		work.ErrWorkServiceOrderAlreadyCancelled,
 		work.ErrWorkServiceOrderInvalidStatus,
 	}
+	validationErrors = []error{
+		task.ErrInvalidWorks,
+	}
 	// Infrastructure errors: the client only gets a generic message, the cause goes to the log.
 	infraConflictErrors  = []error{app.ErrDataConflict, app.ErrInfraConflict}
 	infraViolationErrors = []error{app.ErrDataViolation}
@@ -130,7 +133,8 @@ func isBadRequestError(err error) bool {
 		errors.Is(err, jsonv2.ErrJSONType) ||
 		errors.Is(err, jsonv2.ErrJSONUnexpectedEOF) ||
 		errors.Is(err, jsonv2.ErrJSONEmptyBody) ||
-		errors.Is(err, jsonv2.ErrWrongPayloadFormat)
+		errors.Is(err, jsonv2.ErrWrongPayloadFormat) ||
+		containsAny(err, validationErrors)
 }
 
 func isInternalServerError(err error) bool {

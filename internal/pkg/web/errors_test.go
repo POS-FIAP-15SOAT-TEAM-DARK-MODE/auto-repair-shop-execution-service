@@ -28,6 +28,8 @@ func TestError_StatusCodes(t *testing.T) {
 		"data conflict":          {app.ErrDataConflict, http.StatusConflict},
 		"infra conflict":         {app.ErrInfraConflict, http.StatusConflict},
 		"data violation":         {app.ErrDataViolation, http.StatusUnprocessableEntity},
+		"invalid works":          {task.ErrInvalidWorks, http.StatusBadRequest},
+		"wrapped invalid works":  {fmt.Errorf("enqueue: %w", task.ErrInvalidWorks), http.StatusBadRequest},
 		"json syntax":            {jsonv2.ErrJSONSyntax, http.StatusBadRequest},
 		"json empty body":        {jsonv2.ErrJSONEmptyBody, http.StatusBadRequest},
 		"json unsupported value": {jsonv2.ErrJSONUnsupportedValue, http.StatusInternalServerError},
