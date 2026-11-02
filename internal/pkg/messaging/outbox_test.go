@@ -50,3 +50,28 @@ func TestEnqueue_MarshalError(t *testing.T) {
 	err := Enqueue(context.Background(), nil, "t", "", Envelope{Payload: []byte("{")})
 	assert.Error(t, err)
 }
+
+func TestCountPending(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM outbox WHERE published_at IS NULL").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(7))
+
+	n, err := CountPending(context.Background(), db)
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), n)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCountPending_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectQuery("published_at IS NULL").WillReturnError(errors.New("boom"))
+
+	_, err = CountPending(context.Background(), db)
+	assert.Error(t, err)
+}

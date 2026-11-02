@@ -12,8 +12,10 @@ import (
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/pkg/id"
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/pkg/logger"
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/pkg/messaging"
+	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/pkg/metrics"
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/task"
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/task/repository"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
@@ -31,8 +33,20 @@ func Servers() []app.Server {
 		middlewaresContainer(),
 	)
 
+	registerOutboxMetric(database)
+
 	servers := []app.Server{app.NewHTTPServer("http-api", ":"+env.GetString("PORT", "8084"), router)}
 	return append(servers, messagingWorkers(database, service)...)
+}
+
+// registerOutboxMetric exposes outbox_pending. The outbox is written whether or not messaging is enabled.
+func registerOutboxMetric(database *sql.DB) {
+	err := metrics.RegisterOutboxPending(prometheus.DefaultRegisterer, func(ctx context.Context) (int64, error) {
+		return messaging.CountPending(ctx, database)
+	})
+	if err != nil {
+		logger.Global().Error(err, zap.String("metric", "outbox_pending"))
+	}
 }
 
 // messagingWorkers starts the relay and the consumer. They are disabled when the queue or topic is not configured.
@@ -40,7 +54,7 @@ func messagingWorkers(database *sql.DB, service *task.Service) []app.Server {
 	queueURL := env.GetString("EXECUTION_QUEUE_URL", "")
 	eventsARN := env.GetString("EXECUTION_EVENTS_TOPIC_ARN", "")
 	if queueURL == "" || eventsARN == "" {
-		logger.Global().Warn("messaging disabled: EXECUTION_QUEUE_URL or EXECUTION_EVENTS_TOPIC_ARN is empty")
+		logger.Global().Warn("messaging.disabled", zap.String("reason", "EXECUTION_QUEUE_URL or EXECUTION_EVENTS_TOPIC_ARN is empty"))
 		return nil
 	}
 

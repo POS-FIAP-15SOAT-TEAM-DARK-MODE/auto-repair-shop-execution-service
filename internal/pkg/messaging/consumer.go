@@ -51,24 +51,40 @@ func (c *Consumer) Run(ctx context.Context) error {
 			continue
 		}
 		for _, m := range msgs {
-			if err := c.Handle(ctx, m); err != nil {
-				logger.Global().Error(err, zap.String("component", "sqs-consumer"))
-			}
+			_ = c.Handle(ctx, m) // already logged, with the message fields, by Handle
 		}
 	}
 	return nil
 }
 
-// Handle processes one message. A non-nil error means the message must stay in the queue.
+// Handle processes one message and logs a failure with the message's fields
+// (message_id, saga_id, service_order_id, request_id). A non-nil error means the
+// message must stay in the queue.
 func (c *Consumer) Handle(ctx context.Context, m Message) error {
 	env, err := Decode([]byte(m.Body))
 	if err != nil {
-		return fmt.Errorf("decode message: %w", err)
+		err = fmt.Errorf("decode message: %w", err)
+		logger.Of(ctx).Error(err, zap.String("component", "sqs-consumer"))
+		return err
 	}
 
+	ctx = logger.With(ctx,
+		zap.String("message_id", env.MessageID),
+		zap.String("saga_id", env.SagaID),
+		zap.String("service_order_id", env.ServiceOrderID),
+		zap.String("request_id", env.RequestID),
+	)
+	if err := c.apply(ctx, m, env); err != nil {
+		logger.Of(ctx).Error(err, zap.String("component", "sqs-consumer"), zap.String("type", env.Type))
+		return err
+	}
+	return nil
+}
+
+func (c *Consumer) apply(ctx context.Context, m Message, env Envelope) error {
 	h, ok := c.handlers[env.Type]
 	if !ok {
-		logger.Global().Warn("unknown message type, discarding", zap.String("type", env.Type), zap.String("message_id", env.MessageID))
+		logger.Of(ctx).Warn("message.unknown_type_discarded", zap.String("type", env.Type))
 		return c.delete(ctx, m)
 	}
 
@@ -85,7 +101,7 @@ func (c *Consumer) Handle(ctx context.Context, m Message) error {
 	if n, err := res.RowsAffected(); err != nil {
 		return err
 	} else if n == 0 {
-		logger.Global().Info("duplicate message ignored", zap.String("message_id", env.MessageID), zap.String("type", env.Type))
+		logger.Of(ctx).Info("message.duplicate_ignored", zap.String("type", env.Type))
 		return c.delete(ctx, m)
 	}
 
