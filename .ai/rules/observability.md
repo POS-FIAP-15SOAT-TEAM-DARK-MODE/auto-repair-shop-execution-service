@@ -1,8 +1,10 @@
 # Observability
 
 ## Logs
-- Logger: Zap, JSON (`internal/pkg/logger`). Levels: `INFO` for business decisions (execution queued, duplicate ignored,
-  cancel ignored), `WARN` for rejected commands (invalid works), `ERROR` for infrastructure failures.
+- Logger: Zap, JSON (`internal/pkg/logger`). Levels: `INFO` for business decisions (`execution.enqueue_ignored`,
+  `execution.cancel_ignored`, `message.duplicate_ignored`, `outbox.enqueued`), `WARN` for rejected or discarded input
+  (`execution.enqueue_rejected`, `message.unknown_type_discarded`, `messaging.disabled`), `ERROR` for infrastructure
+  failures.
 - Every line has `service` = `execution-service`. The request or message context adds the correlation fields:
   `request_id` (always), `service_order_id`, `saga_id` and `message_id` when known.
   - HTTP: the Logger middleware takes `X-Request-Id` or generates one, and writes it back to the request header, so the

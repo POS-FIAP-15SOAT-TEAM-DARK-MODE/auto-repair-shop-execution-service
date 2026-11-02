@@ -17,7 +17,7 @@ Single source of truth for all AI agent rules in this project.
     security.md            JWT, roles, queue policy, secrets
     observability.md       Zap, log levels, metrics, redaction
     workflow.md            Conventional Commits, CI jobs, dev commands
-  commands/            # reusable playbooks (also Claude Code slash commands via symlinks)
+  commands/            # reusable playbooks
     add-migration.md       create and apply a versioned migration
   hooks/               # pre-commit hook scripts
     check-ai-rules.sh      enforces .ai/ as the only rule source
