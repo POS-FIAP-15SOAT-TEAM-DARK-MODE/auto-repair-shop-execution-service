@@ -147,3 +147,21 @@ func TestError_JoinOfDriverErrorIsGeneric500(t *testing.T) {
 	assert.Nil(t, body.Errors)
 	assert.NotContains(t, body.Error, "pq:")
 }
+
+func TestError_ValidationWrappedWithExternalCauseOnlyListsSentinel(t *testing.T) {
+	err := fmt.Errorf("%w: %w", task.ErrInvalidWorks, errors.New(sensitive))
+	status, body := Error(err)
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Equal(t, []string{task.ErrInvalidWorks.Error()}, body.Errors)
+	assert.Empty(t, body.Error)
+	assert.NotContains(t, fmt.Sprint(body.Errors), "pq:")
+}
+
+func TestError_UnknownAndDriverOnlyJoinIsGeneric500(t *testing.T) {
+	err := errors.Join(errors.New("boom"), errors.New(sensitive))
+	status, body := Error(err)
+	assert.Equal(t, http.StatusInternalServerError, status)
+	assert.Equal(t, "internal server error", body.Error)
+	assert.Nil(t, body.Errors)
+	assert.NotContains(t, body.Error, "pq:")
+}

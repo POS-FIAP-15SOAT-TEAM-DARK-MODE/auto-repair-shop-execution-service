@@ -129,8 +129,9 @@ func isBadRequestError(err error) bool {
 	return len(validationMessages(err)) > 0
 }
 
-// validationMessages returns the messages of the validation sentinels that err matches
-// (also through errors.Join). Any other cause in the same error is never included.
+// validationMessages returns the messages of the validation sentinels matched by any leaf of
+// err (wraps and errors.Join included). A match means 400; only the sentinel texts are listed,
+// never the text of other causes wrapped alongside.
 func validationMessages(err error) []string {
 	var msgs []string
 	for _, s := range validationErrors {
