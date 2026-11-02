@@ -47,7 +47,7 @@ internal/task/repository       PostgreSQL and in-memory repositories
 internal/app                   HTTP server, bootstrap (API + relay + consumer), routing, middlewares
 internal/pkg                   shared packages: auth (JWT, roles), messaging (outbox, relay, consumer), web, ...
 migrations                     golang-migrate schema (execution_task, execution_work, history, outbox, dedupe)
-testdata/contracts             message fixtures (contracts/messaging.md)
+testdata/contracts             message fixtures (spec: auto-repair-shop/docs/fase4/contracts/messaging.md)
 ```
 
 ## Run
@@ -68,6 +68,22 @@ variables the HTTP API still starts, and the relay and consumer are disabled.
 
 ## Quality gates
 
-- Coverage: total ≥ 80 % and ≥ 90 % for `internal/task` and `internal/work` (generated mocks excluded). CI job
-  `coverage`.
-- Integration tests (`-tags=integration`) run in CI against PostgreSQL and MiniStack.
+- Coverage: total ≥ 80 % and ≥ 90 % for `internal/task` and `internal/work`. CI job `coverage`.
+- Measured on 2026-11-01 with `LOG_LEVEL=PANIC go test ./... --race -count=1` (the repo has no generated mocks):
+
+| Package | Coverage |
+|---|---|
+| **total** | **90.8 %** |
+| `internal/task` | 93.7 % |
+| `internal/task/repository` | 99.2 % |
+| `internal/work` | 100 % |
+| `internal/app` | 36.4 % |
+| `internal/app/bootstrap` | 17.6 % |
+| `internal/app/routing` | 84.0 % |
+| `internal/app/middleware` | 100 % |
+| `internal/pkg/messaging` | 97.2 % |
+| `internal/pkg/logger` | 94.3 % |
+| `internal/pkg/web` | 97.3 % |
+| other `internal/pkg/*` | 100 % |
+
+- Integration tests (`-tags=integration`) run in CI against PostgreSQL and MiniStack; they are not in the table.
