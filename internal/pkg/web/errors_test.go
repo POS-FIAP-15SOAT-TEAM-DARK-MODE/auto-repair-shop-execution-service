@@ -28,10 +28,12 @@ func TestError_StatusCodes(t *testing.T) {
 		"data conflict":          {app.ErrDataConflict, http.StatusConflict},
 		"infra conflict":         {app.ErrInfraConflict, http.StatusConflict},
 		"data violation":         {app.ErrDataViolation, http.StatusUnprocessableEntity},
+		"invalid works":          {task.ErrInvalidWorks, http.StatusBadRequest},
+		"wrapped invalid works":  {fmt.Errorf("enqueue: %w", task.ErrInvalidWorks), http.StatusBadRequest},
 		"json syntax":            {jsonv2.ErrJSONSyntax, http.StatusBadRequest},
 		"json empty body":        {jsonv2.ErrJSONEmptyBody, http.StatusBadRequest},
 		"json unsupported value": {jsonv2.ErrJSONUnsupportedValue, http.StatusInternalServerError},
-		"joined errors":          {errors.Join(errors.New("a"), errors.New("b")), http.StatusBadRequest},
+		"joined unknown errors":  {errors.Join(errors.New("a"), errors.New("b")), http.StatusInternalServerError},
 		"unknown error":          {errors.New("unexpected"), http.StatusInternalServerError},
 		"wrapped not found":      {fmt.Errorf("lookup: %w", task.ErrTaskNotFound), http.StatusNotFound},
 		"wrapped conflict":       {fmt.Errorf("finish: %w", task.ErrWorksNotFinished), http.StatusConflict},
@@ -55,19 +57,111 @@ func TestError_BodyShape(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, status)
 	assert.Equal(t, task.ErrTaskNotFound.Error(), body.Error)
 
-	status, body = Error(errors.Join(errors.New("first"), errors.New("second")))
+	status, body = Error(errors.Join(task.ErrInvalidWorks, jsonv2.ErrJSONSyntax))
 	assert.Equal(t, http.StatusBadRequest, status)
-	assert.Equal(t, []string{"first", "second"}, body.Errors)
+	assert.Equal(t, []string{jsonv2.ErrJSONSyntax.Error(), task.ErrInvalidWorks.Error()}, body.Errors)
 	assert.Empty(t, body.Error)
 
-	// Same rule as the monolith: 5xx shows the innermost message.
+	// 5xx never shows the underlying cause.
 	status, body = Error(fmt.Errorf("outer: %w", errors.New("root cause")))
 	assert.Equal(t, http.StatusInternalServerError, status)
-	assert.Equal(t, "root cause", body.Error)
+	assert.Equal(t, "internal server error", body.Error)
+}
+
+const sensitive = `pq: duplicate key value violates unique constraint "x" (value)`
+
+func TestError_InfraDetailsNeverLeak(t *testing.T) {
+	cases := map[string]struct {
+		err     error
+		status  int
+		message string
+	}{
+		"5xx unknown driver error": {errors.New(sensitive), http.StatusInternalServerError, "internal server error"},
+		"5xx wrapped driver error": {fmt.Errorf("save: %w", errors.New(sensitive)), http.StatusInternalServerError, "internal server error"},
+		"json unsupported value":   {fmt.Errorf("encode: %w", jsonv2.ErrJSONUnsupportedValue), http.StatusInternalServerError, "internal server error"},
+		"infra data conflict":      {fmt.Errorf("%s: %w", sensitive, app.ErrDataConflict), http.StatusConflict, "conflict"},
+		"infra conflict":           {fmt.Errorf("%s: %w", sensitive, app.ErrInfraConflict), http.StatusConflict, "conflict"},
+		"infra data violation":     {fmt.Errorf("%s: %w", sensitive, app.ErrDataViolation), http.StatusUnprocessableEntity, "invalid data"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			status, body := Error(tc.err)
+			assert.Equal(t, tc.status, status)
+			assert.Equal(t, tc.message, body.Error)
+			assert.Equal(t, tc.status, body.StatusCode)
+			assert.Nil(t, body.Errors)
+			assert.NotContains(t, body.Error, "pq:")
+			assert.NotContains(t, body.Error, "constraint")
+		})
+	}
+}
+
+func TestError_DomainMessageIsSentinelOwn(t *testing.T) {
+	cases := map[string]struct {
+		err      error
+		status   int
+		sentinel error
+	}{
+		"not found wrapped with driver text": {fmt.Errorf("%s: %w", sensitive, task.ErrTaskNotFound), http.StatusNotFound, task.ErrTaskNotFound},
+		"conflict wrapped with driver text":  {fmt.Errorf("%s: %w", sensitive, task.ErrTaskNotActive), http.StatusConflict, task.ErrTaskNotActive},
+		"work conflict wrapped":              {fmt.Errorf("finish: %w", work.ErrWorkServiceOrderInvalidStatus), http.StatusConflict, work.ErrWorkServiceOrderInvalidStatus},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			status, body := Error(tc.err)
+			assert.Equal(t, tc.status, status)
+			assert.Equal(t, tc.sentinel.Error(), body.Error)
+			assert.NotContains(t, body.Error, "pq:")
+		})
+	}
 }
 
 func TestError_RootCauseForConflict(t *testing.T) {
 	wrapped := fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", work.ErrWorkServiceOrderAlreadyCancelled))
 	_, body := Error(wrapped)
 	assert.Equal(t, work.ErrWorkServiceOrderAlreadyCancelled.Error(), body.Error)
+}
+
+func TestIsInfraError(t *testing.T) {
+	assert.True(t, IsInfraError(fmt.Errorf("x: %w", app.ErrDataConflict)))
+	assert.True(t, IsInfraError(app.ErrInfraConflict))
+	assert.True(t, IsInfraError(app.ErrDataViolation))
+	assert.False(t, IsInfraError(task.ErrTaskNotActive))
+	assert.False(t, IsInfraError(errors.New("unknown")))
+}
+
+func TestError_JoinOfValidationSentinelOnlyListsSentinels(t *testing.T) {
+	err := errors.Join(task.ErrInvalidWorks, errors.New(sensitive))
+	status, body := Error(err)
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Equal(t, []string{task.ErrInvalidWorks.Error()}, body.Errors)
+	assert.Empty(t, body.Error)
+	assert.NotContains(t, fmt.Sprint(body.Errors), "pq:")
+}
+
+func TestError_JoinOfDriverErrorIsGeneric500(t *testing.T) {
+	err := errors.Join(errors.New(sensitive), fmt.Errorf("save: %w", errors.New("pq: connection reset")))
+	status, body := Error(err)
+	assert.Equal(t, http.StatusInternalServerError, status)
+	assert.Equal(t, "internal server error", body.Error)
+	assert.Nil(t, body.Errors)
+	assert.NotContains(t, body.Error, "pq:")
+}
+
+func TestError_ValidationWrappedWithExternalCauseOnlyListsSentinel(t *testing.T) {
+	err := fmt.Errorf("%w: %w", task.ErrInvalidWorks, errors.New(sensitive))
+	status, body := Error(err)
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Equal(t, []string{task.ErrInvalidWorks.Error()}, body.Errors)
+	assert.Empty(t, body.Error)
+	assert.NotContains(t, fmt.Sprint(body.Errors), "pq:")
+}
+
+func TestError_UnknownAndDriverOnlyJoinIsGeneric500(t *testing.T) {
+	err := errors.Join(errors.New("boom"), errors.New(sensitive))
+	status, body := Error(err)
+	assert.Equal(t, http.StatusInternalServerError, status)
+	assert.Equal(t, "internal server error", body.Error)
+	assert.Nil(t, body.Errors)
+	assert.NotContains(t, body.Error, "pq:")
 }

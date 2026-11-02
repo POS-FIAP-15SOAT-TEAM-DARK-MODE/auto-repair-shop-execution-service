@@ -16,6 +16,9 @@ type customLogger struct {
 	*zap.Logger
 }
 
+// serviceName is the value of the `service` field on every log line.
+const serviceName = "execution-service"
+
 type ctxKey struct{}
 
 var (
@@ -37,6 +40,7 @@ func initLogger() *zap.Logger {
 	cfg.EncoderConfig.TimeKey = "timestamp"
 	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	cfg.EncoderConfig.MessageKey = "message"
+	cfg.InitialFields = map[string]any{"service": serviceName}
 	cfg.Level = getLogLevel(env.GetString("LOG_LEVEL", "INFO"))
 
 	l, err := cfg.Build()
@@ -72,10 +76,14 @@ func Request(ctx context.Context, incomingID string) (context.Context, string) {
 	if reqId == "" {
 		reqId = uuid.New().String()
 	}
-	l := initLogger().With(
-		zap.String("request_id", reqId),
-	)
-	return withContext(ctx, &customLogger{l}), reqId
+	return With(ctx, zap.String("request_id", reqId)), reqId
+}
+
+// With returns a context whose logger adds fields to every line, on top of the
+// logger already in ctx (or the global one). Used for saga_id, service_order_id
+// and message_id, which are only known after the request or message is parsed.
+func With(ctx context.Context, fields ...zap.Field) context.Context {
+	return withContext(ctx, &customLogger{Of(ctx).Logger.With(sanitizeFields(fields)...)})
 }
 
 func Of(ctx context.Context) *customLogger {
@@ -146,6 +154,7 @@ func isSensitiveKey(key string) bool {
 		key == "senha" ||
 		key == "pwd" ||
 		key == "token" ||
+		key == "jwt" ||
 		key == "authorization" ||
 		key == "cpf" ||
 		key == "cnpj" ||

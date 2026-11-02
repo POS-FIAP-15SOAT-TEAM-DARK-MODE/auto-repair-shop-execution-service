@@ -60,14 +60,30 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Unexpected failure. The body never contains the cause; it is only logged.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: 500
+            error: internal server error
   schemas:
     Error:
       type: object
+      description: |
+        Every error body has `code` (the HTTP status). `error` (the message) and `errors` (validation messages,
+        400 only) are omitted when empty. 404 and 409 carry the message of the domain sentinel; infrastructure
+        409/422 carry a generic message.
+      required: [code]
       properties:
         code:
           type: integer
+          example: 409
         error:
           type: string
+          example: all works must be completed or cancelled before finishing
         errors:
           type: array
           items:
@@ -107,6 +123,35 @@ components:
           items:
             $ref: '#/components/schemas/QueueItem'
 paths:
+  /ping:
+    get:
+      summary: Health check
+      description: Not under /v1 and no token required.
+      responses:
+        '200':
+          description: The service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: pong
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: |
+        Not under /v1 and no token required. Scraped by the ServiceMonitor in the lab, stg and prd overlays.
+        Includes http_request_duration_seconds (labels method, route, status) and outbox_pending (NaN when the
+        query fails).
+      responses:
+        '200':
+          description: Prometheus text exposition.
+          content:
+            text/plain:
+              schema:
+                type: string
   /v1/execution/queue:
     get:
       summary: List the execution queue
@@ -126,6 +171,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /v1/service-order/{id}/work/{workId}/next:
     put:
       summary: Advance a work to its next status
@@ -150,6 +197,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /v1/service-order/{id}/work/{workId}/cancel:
     put:
       summary: Cancel a work
@@ -171,6 +220,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /v1/service-order/{id}/finish:
     put:
       summary: Finish the task of a service order
@@ -196,3 +247,5 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'

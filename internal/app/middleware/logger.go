@@ -11,6 +11,9 @@ import (
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/pkg/logger"
 )
 
+// RequestIDHeader is the header that carries the request_id across services.
+const RequestIDHeader = "X-Request-Id"
+
 func Logger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -20,10 +23,13 @@ func Logger() gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-		ctx, reqId := logger.Request(ctx, c.GetHeader("X-Request-Id"))
+		ctx, reqId := logger.Request(ctx, c.GetHeader(RequestIDHeader))
 		c.Request = c.Request.WithContext(ctx)
+		// Handlers read the id from the request header, so the message envelopes they
+		// publish carry the same request_id as the log lines of the request.
+		c.Request.Header.Set(RequestIDHeader, reqId)
 
-		c.Writer.Header().Set("X-Request-ID", reqId)
+		c.Writer.Header().Set(RequestIDHeader, reqId)
 
 		start := time.Now()
 		query := c.Request.URL.RawQuery
@@ -34,7 +40,7 @@ func Logger() gin.HandlerFunc {
 			zap.String("ip", c.ClientIP()),
 		}
 
-		logger.Of(ctx).Info("starting request", fields...)
+		logger.Of(ctx).Info("request.started", fields...)
 
 		c.Next()
 
@@ -49,6 +55,6 @@ func Logger() gin.HandlerFunc {
 			return
 		}
 
-		logger.Of(ctx).Info("ending request", fields...)
+		logger.Of(ctx).Info("request.completed", fields...)
 	}
 }

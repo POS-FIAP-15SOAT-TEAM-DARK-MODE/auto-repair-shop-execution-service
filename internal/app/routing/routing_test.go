@@ -2,12 +2,15 @@ package routing_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/app"
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/app/container"
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/app/routing"
 	"github.com/POS-FIAP-15SOAT-TEAM-DARK-MODE/auto-repair-shop-execution-service/internal/pkg/auth"
@@ -156,4 +159,40 @@ func TestRoutes_CancelWorkRejectsCompletedWork(t *testing.T) {
 	rec := do(e.h, http.MethodPut, "/v1/service-order/"+soID+"/work/w-1/cancel", mech)
 	assert.Equal(t, http.StatusConflict, rec.Code)
 	require.NoError(t, e.mock.ExpectationsWereMet())
+}
+
+func TestAdapters_HideInfraDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	driverErr := `pq: duplicate key value violates unique constraint "x" (value)`
+
+	r := gin.New()
+	r.GET("/value", routing.GinHandler(func(context.Context, *http.Request) (string, error) {
+		return "", fmt.Errorf("%s: %w", driverErr, app.ErrDataConflict)
+	}))
+	r.GET("/only", routing.GinOnlyErrorHandler(func(context.Context, *http.Request) error {
+		return fmt.Errorf("%s: %w", driverErr, app.ErrDataViolation)
+	}))
+	r.GET("/unknown", routing.GinOnlyErrorHandler(func(context.Context, *http.Request) error {
+		return errors.New(driverErr)
+	}))
+
+	cases := map[string]struct {
+		path    string
+		status  int
+		message string
+	}{
+		"handler infra conflict": {"/value", http.StatusConflict, "conflict"},
+		"only infra violation":   {"/only", http.StatusUnprocessableEntity, "invalid data"},
+		"only unknown error":     {"/unknown", http.StatusInternalServerError, "internal server error"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+
+			assert.Equal(t, tc.status, rec.Code)
+			assert.JSONEq(t, fmt.Sprintf(`{"code":%d,"error":%q}`, tc.status, tc.message), rec.Body.String())
+			assert.NotContains(t, rec.Body.String(), "pq:")
+		})
+	}
 }

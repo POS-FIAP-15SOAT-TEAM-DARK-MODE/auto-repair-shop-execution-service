@@ -19,8 +19,7 @@ func Auth(routeRoles ...auth.Role) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.GetHeader(authorizationHeader)
 		if token == "" || !strings.HasPrefix(token, bearerPrefix) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": http.StatusUnauthorized, "error": "Unauthorized"})
 			return
 		}
 
@@ -29,18 +28,15 @@ func Auth(routeRoles ...auth.Role) gin.HandlerFunc {
 		userClaims, err := auth.GetClaims(token)
 		if err != nil {
 			if errors.Is(err, jwt.ErrTokenExpired) {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Token expired"})
-				c.Abort()
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": http.StatusUnauthorized, "error": "Token expired"})
 				return
 			}
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": http.StatusUnauthorized, "error": "Unauthorized"})
 			return
 		}
 
 		if !auth.HasRequiredRoles(userClaims.Roles, routeRoles) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden"})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": http.StatusForbidden, "error": "Forbidden"})
 			return
 		}
 	}

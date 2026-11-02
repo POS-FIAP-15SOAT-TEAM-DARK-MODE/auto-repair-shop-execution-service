@@ -28,3 +28,9 @@ execution (mechanic) work must not depend on the service order database.
 - Each change, its history row and its outbox event are written in one transaction, and the consumer dedupes by
   `message_id`, so a redelivered command has no extra effect.
 - Work-level history (with start time per work) is consumed by History to build the work report.
+
+## Update (2026-11-01)
+
+- `execution_work` has no start-time column. The start of a work is the `created_at` of its
+  `execution_work_history` row whose `new_status` is `IN_PROGRESS`. The task `started_at` is set by the first work
+  that starts (`internal/task/task.go`).

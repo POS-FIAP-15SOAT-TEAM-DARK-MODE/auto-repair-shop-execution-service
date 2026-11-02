@@ -12,7 +12,7 @@ trigger: always_on
 
 ### 1. Security
 - Never log or expose CPF, CNPJ, passwords, or JWT tokens in any response, log entry, or error message.
-- bcrypt min cost 12; auth middleware must not make extra DB calls — rely entirely on JWT payload.
+- Auth middleware must not make extra DB calls — rely entirely on JWT payload.
 - Validate all input at handler layer; never trust raw strings inside services or domain.
 
 ### 2. Git Conventions

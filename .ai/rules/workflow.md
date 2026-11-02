@@ -6,7 +6,8 @@
 - CI jobs: `pre-commit`, `build`, `unit-tests`, `integration-tests`, `coverage`, `sonarqube` (needs `SONAR_TOKEN`).
 
 ## Scopes
-`messaging` · `work` · `task` · `api` · `db` · `k8s` · `infra` · `docs` · `ci` · `bootstrap`
+`messaging` · `work` · `task` · `api` · `db` · `k8s` · `infra` · `docs` · `ci` · `bootstrap` · `web` · `auth` ·
+`middleware` · `routing` · `integration` · `compose` · `deps` (the last group is used in this repo's history).
 
 ## Local commands
 ```bash

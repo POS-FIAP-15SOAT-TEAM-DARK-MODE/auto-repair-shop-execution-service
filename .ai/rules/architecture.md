@@ -19,5 +19,7 @@ progress of each work. It has no synchronous dependency on other services.
 - Repositories take `db.Executor`, so they run on a `*sql.Tx` or a `*sql.DB`.
 
 ## Domain purity
-`task` and `work` do not import Gin, `lib/pq` or the messaging package. The aggregate records the
-`work.Change` list; the service turns it into events.
+The domain files (`internal/work/work.go`, `internal/task/task.go`, `internal/task/messages.go`,
+`internal/task/repository.go`) import no Gin, `lib/pq` or messaging package. The aggregate records the `work.Change`
+list; `internal/task/service.go` (application layer) turns it into events through `messaging`. `lib/pq` is imported
+only by `internal/task/repository/postgres.go`; `net/http` only by `internal/task/controller.go`.
