@@ -1,0 +1,14 @@
+# <type>(<scope>): <short description>
+# |<---- max 72 characters ---->|
+#
+# Types: feat | fix | refactor | test | chore | docs | perf | style | revert
+#
+# Scopes: messaging | work | task | api | db | k8s | infra | docs | ci | bootstrap |
+#         web | auth | middleware | routing | integration | compose | deps
+#
+# --- Examples ---
+# feat(task): enqueue execution with the saga id of the command
+# fix(messaging): keep the message when the outbox write fails
+# refactor(work): extract the status transition table
+# test(task): add edge cases for cancel after finish
+# chore(k8s): update the execution-service probes

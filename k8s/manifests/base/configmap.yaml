@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: execution-service-config
+  labels:
+    app: execution-service
+# Non-sensitive runtime config (mirrors .env). Sensitive values live in
+# execution-service-secrets. Overlays set POSTGRES_HOST (RDS endpoint).
+# EXECUTION_QUEUE_URL / EXECUTION_EVENTS_TOPIC_ARN are applied by the docker workflow.
+data:
+  PORT: "8084"
+  LOG_LEVEL: "INFO"
+  POSTGRES_PORT: "5432"
+  POSTGRES_SSLMODE: "disable"
+  AWS_REGION: "us-east-1"
